@@ -1,0 +1,127 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Steve Wenck"
+date: "October 22, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, eval=TRUE, warning=FALSE, message=FALSE)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants will be used to predict the manner in which the participants performed the exercise.
+
+## Obtain the data
+
+The code below sets up the environment, downloads the datasets, and reads the training and validation datasets.
+
+```{r data_download}
+## Set working directory
+setwd("~/R/Coursera/Data Science/Course 8/Project")
+
+## Load needed packages
+library(caret)
+library(randomForest)
+
+## Download the training dataset
+destfile="pml-training.csv"
+fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+if (!file.exists(destfile)) {
+    download.file(fileURL,destfile,method="auto")
+}
+
+## Download the testing dataset
+destfile="pml-testing.csv"
+fileURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+if (!file.exists(destfile)) {
+    download.file(fileURL,destfile,method="auto")
+}
+
+## Read the training dataset
+trainingMaster <- read.csv("pml-training.csv", na.strings = c("NA", ""))
+
+## Read the testing dataset (to be used as validation)
+validationMaster <- read.csv("pml-testing.csv", na.strings = c("NA", ""))
+```
+
+## Clean the data
+
+In the next block of code, the data are prepared for training and prediction. First, the ID variables (X and user_name) are removed along with non-numeric variables (timestamps and windows) are removed from the training dataset. Second, near zero variance predictors are removed from the training dataset. Finally, variables with more than 70% missingness (NAs) are removed from the training dataset.
+
+```{r clean}
+## Remove ID variables from the training dataset
+trainingMaster <- subset(trainingMaster, select=-c(X,user_name,raw_timestamp_part_1,raw_timestamp_part_2,cvtd_timestamp,new_window,num_window))
+
+## Detect and remove Near Zero Variance Predictors
+nzv <- nearZeroVar(trainingMaster, saveMetrics=TRUE)
+trainingMaster <- trainingMaster[,nzv$nzv==FALSE]
+
+## Remove variables with more than 70% NAs
+trainingNAs <- trainingMaster
+for(i in 1:length(trainingMaster)) {
+    if( sum( is.na( trainingMaster[, i] ) ) /nrow(trainingMaster) > 0.7) {
+        for(j in 1:length(trainingNAs)) {
+            if( length( grep(names(trainingMaster[i]), names(trainingNAs)[j]) ) == 1)  {
+                trainingNAs <- trainingNAs[ , -j]
+            }
+        }
+    }
+}
+trainingMaster <- trainingNAs
+```
+
+## Separate the data
+
+In this step, the seed is set for reproducibility and the training dataset is split into train and test subsets. Note that the original test dataset (above as validationMaster) is not used until after the prediction model has been trained and tested on the separated training dataset (code below).
+
+```{r separate}
+## Set the seed for reproducibility
+set.seed(2416)
+
+## Split Training dataset into a training and testing dataset (leaving original testing dataset for validation)
+trainPart <- createDataPartition(trainingMaster$classe, p=0.7, list=FALSE)
+training <- trainingMaster[trainPart, ]
+testing <- trainingMaster[-trainPart, ]
+```
+
+## Model the data
+
+A predictive model using the Random Forest method is employed for this project. This method was chosen because it is one of the most accurate learning algorithms. One of the downfalls of this method is that it can be slow. To combat the speed issue for this project, the number of trees was limited to 250. Additionally, 5-fold cross-validation is used in the model to increase the accuracy. Five folds were chosen to reduce bias.
+
+```{r model, cache=TRUE}
+## Train using Random Forest
+model <- train(classe ~ ., data=training, method="rf", trControl=trainControl(method="cv", 5), ntree=250)
+model
+```
+
+## Evaluate the model performace
+
+The model created on the training dataset is now tested on the test portion of the training data. Again, the original validation data are still not being used.
+
+```{r model_perfom}
+## Estimate performance on test data
+predictRf <- predict(model, testing)
+confusionMatrix(testing$classe, predictRf)
+
+## Calculate prediction accurancy
+accuracy <- postResample(predictRf, testing$classe)
+accuracy
+
+## Calculate out-of-sample error
+oose <- 1 - as.numeric(confusionMatrix(testing$classe, predictRf)$overall[1])
+oose
+```
+
+The model accurancy is `r round(accuracy[1]*100,2)`% and the out-of-sample error is `r round(oose*100,3)`%.
+
+## Predict on validation data
+
+Now is the time to use the original validation data to check the predictive ability of the model.
+
+```{r validation}
+predict(model,validationMaster)
+```
